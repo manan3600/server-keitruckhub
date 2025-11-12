@@ -1,9 +1,9 @@
-// server.js
 import express from "express";
 import cors from "cors";
 
 const app = express();
 app.use(cors());
+app.use(express.json()); 
 
 const models = [
   { id: "suzuki", name: "Suzuki Carry", year: 1999, description: "Reliable workhorse with compact size and great utility." },
@@ -14,6 +14,28 @@ const models = [
 
 app.get("/api/models", (req, res) => {
   res.json(models);
+});
+
+app.post("/api/models", (req, res) => {
+  const { id, name, year, description } = req.body;
+
+  if (!id || !name) {
+    return res.status(400).json({ error: "id and name are required" });
+  }
+
+  if (models.find(m => m.id === id)) {
+    return res.status(409).json({ error: "A model with that id already exists" });
+  }
+
+  const newModel = {
+    id,
+    name,
+    year: Number(year) || null,
+    description: description || ""
+  };
+
+  models.push(newModel);
+  res.status(201).json(newModel);
 });
 
 const PORT = process.env.PORT || 4000;
