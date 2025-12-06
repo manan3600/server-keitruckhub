@@ -6,8 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// For now we'll point image URLs to your GitHub Pages site,
-// so we don't need the server to host images yet.
+
 const IMG_BASE = "https://manan3600.github.io/keitruckhub/images";
 
 const models = [
@@ -71,3 +70,5 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`✅ server-keitruckhub running on http://localhost:${PORT}`);
 });
+
+

@@ -5,13 +5,14 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { connect, Schema, model } from "mongoose";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// CORS (Express 5-safe)
+// CORS
 app.use(
   cors({
     origin: "*",
@@ -42,8 +43,10 @@ const upload = multer({ storage });
 // Serve uploaded images statically
 app.use("/uploads", express.static(uploadDir));
 
-// Initial dataset
-let models = [
+// ---- MongoDB / Mongoose setup ----
+
+// seed data (will be inserted once if collection empty)
+const seedModels = [
   {
     id: "suzuki",
     name: "Suzuki Carry",
@@ -74,6 +77,16 @@ let models = [
   },
 ];
 
+const truckSchema = new Schema({
+  id: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  year: { type: Number, required: true },
+  description: { type: String, default: "" },
+  imageUrl: { type: String, default: "" },
+});
+
+const Truck = model("Truck", truckSchema);
+
 // Joi validation schemas
 const createSchema = Joi.object({
   id: Joi.string().min(2).required(),
@@ -88,102 +101,151 @@ const editSchema = Joi.object({
   description: Joi.string().allow("").optional(),
 });
 
+// ---- Routes using MongoDB ----
+
 // GET all models
-app.get("/api/models", (req, res) => {
-  res.json(models);
+app.get("/api/models", async (req, res) => {
+  try {
+    const trucks = await Truck.find().sort({ id: 1 }).lean();
+    res.json(trucks);
+  } catch (err) {
+    console.error("GET /api/models error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
 // GET a single model
-app.get("/api/models/:id", (req, res) => {
-  const model = models.find((m) => m.id === req.params.id);
-  if (!model) {
-    return res.status(404).json({ error: "Model not found" });
+app.get("/api/models/:id", async (req, res) => {
+  try {
+    const truck = await Truck.findOne({ id: req.params.id }).lean();
+    if (!truck) {
+      return res.status(404).json({ error: "Model not found" });
+    }
+    res.json(truck);
+  } catch (err) {
+    console.error("GET /api/models/:id error:", err);
+    res.status(500).json({ error: "Server error" });
   }
-  res.json(model);
 });
 
 // POST create model
-app.post("/api/models", upload.single("image"), (req, res) => {
-  const { id, name, year, description } = req.body;
+app.post("/api/models", upload.single("image"), async (req, res) => {
+  try {
+    const { id, name, year, description } = req.body;
 
-  const parsed = {
-    id: id?.trim(),
-    name: name?.trim(),
-    year: Number(year),
-    description: description || "",
-  };
+    const parsed = {
+      id: id?.trim(),
+      name: name?.trim(),
+      year: Number(year),
+      description: description || "",
+    };
 
-  const { error } = createSchema.validate(parsed);
-  if (error) return res.status(400).json({ error: error.details[0].message });
+    const { error } = createSchema.validate(parsed);
+    if (error) {
+      return res.status(400).json({ error: error.details[0].message });
+    }
 
-  const exists = models.some((m) => m.id === parsed.id);
-  if (exists) {
-    return res.status(400).json({ error: "A model with that ID already exists." });
+    const exists = await Truck.findOne({ id: parsed.id });
+    if (exists) {
+      return res
+        .status(400)
+        .json({ error: "A model with that ID already exists." });
+    }
+
+    let imageUrl = "";
+    if (req.file) {
+      imageUrl = `/uploads/${req.file.filename}`;
+    }
+
+    const modelToAdd = new Truck({ ...parsed, imageUrl });
+    await modelToAdd.save();
+
+    res.status(201).json({ success: true, model: modelToAdd });
+  } catch (err) {
+    console.error("POST /api/models error:", err);
+    res.status(500).json({ error: "Server error" });
   }
-
-  let imageUrl = "";
-  if (req.file) {
-    imageUrl = `/uploads/${req.file.filename}`;
-  }
-
-  const modelToAdd = { ...parsed, imageUrl };
-  models.push(modelToAdd);
-
-  res.status(201).json({ success: true, model: modelToAdd });
 });
 
 // PUT edit model
-app.put("/api/models/:id", upload.single("image"), (req, res) => {
-  const modelId = req.params.id;
-  const index = models.findIndex((m) => m.id === modelId);
+app.put("/api/models/:id", upload.single("image"), async (req, res) => {
+  try {
+    const modelId = req.params.id;
 
-  if (index === -1) {
-    return res.status(404).json({ error: "Model not found" });
+    const truck = await Truck.findOne({ id: modelId });
+    if (!truck) {
+      return res.status(404).json({ error: "Model not found" });
+    }
+
+    const { name, year, description } = req.body;
+
+    const parsed = {
+      name: name?.trim(),
+      year: Number(year),
+      description: description || "",
+    };
+
+    const { error } = editSchema.validate(parsed);
+    if (error) {
+      return res.status(400).json({ error: error.details[0].message });
+    }
+
+    if (req.file) {
+      truck.imageUrl = `/uploads/${req.file.filename}`;
+    }
+
+    truck.name = parsed.name;
+    truck.year = parsed.year;
+    truck.description = parsed.description;
+
+    await truck.save();
+
+    res.json({ success: true, model: truck });
+  } catch (err) {
+    console.error("PUT /api/models/:id error:", err);
+    res.status(500).json({ error: "Server error" });
   }
-
-  const { name, year, description } = req.body;
-
-  const parsed = {
-    name: name?.trim(),
-    year: Number(year),
-    description: description || "",
-  };
-
-  const { error } = editSchema.validate(parsed);
-  if (error) return res.status(400).json({ error: error.details[0].message });
-
-  let imageUrl = models[index].imageUrl;
-  if (req.file) {
-    imageUrl = `/uploads/${req.file.filename}`;
-  }
-
-  models[index] = {
-    ...models[index],
-    name: parsed.name,
-    year: parsed.year,
-    description: parsed.description,
-    imageUrl,
-  };
-
-  res.json({ success: true, model: models[index] });
 });
 
 // DELETE model
-app.delete("/api/models/:id", (req, res) => {
-  const modelId = req.params.id;
-  const index = models.findIndex((m) => m.id === modelId);
+app.delete("/api/models/:id", async (req, res) => {
+  try {
+    const modelId = req.params.id;
 
-  if (index === -1) {
-    return res.status(404).json({ error: "Model not found" });
+    const deleted = await Truck.findOneAndDelete({ id: modelId });
+    if (!deleted) {
+      return res.status(404).json({ error: "Model not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DELETE /api/models/:id error:", err);
+    res.status(500).json({ error: "Server error" });
   }
-
-  models.splice(index, 1);
-
-  res.json({ success: true });
 });
 
-// Start server
+
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`server-keitruckhub running on port ${PORT}`);
-});
+const MONGO_URI =
+  process.env.MONGO_URI || "mongodb+srv://<user>:<password>@cluster0.h9t7k5i.mongodb.net/";
+
+async function start() {
+  try {
+    await connect(MONGO_URI);
+    console.log("Connected to MongoDB...");
+
+    const count = await Truck.countDocuments();
+    if (count === 0) {
+      await Truck.insertMany(seedModels);
+      console.log("Seeded initial models collection.");
+    }
+
+    app.listen(PORT, () => {
+      console.log(`server-keitruckhub running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err);
+  }
+}
+
+start();
