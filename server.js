@@ -227,7 +227,7 @@ app.delete("/api/models/:id", async (req, res) => {
 
 const PORT = process.env.PORT || 4000;
 const MONGO_URI =
-  process.env.MONGO_URI || "mongodb+srv://<user>:<password>@cluster0.h9t7k5i.mongodb.net/";
+  process.env.MONGO_URI || "mongodb+srv://manan29501_db_user:8Js3Nz.CEPyk4tt@cluster0.h9t7k5i.mongodb.net/";
 
 async function start() {
   try {
